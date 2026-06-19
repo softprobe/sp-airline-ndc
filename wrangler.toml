@@ -1,0 +1,22 @@
+name = "sp-airline-ndc"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+account_id = "fb4b299688885a31058d94ee11ee1129"
+
+[[durable_objects.bindings]]
+name = "AIRLINE_STORE"
+class_name = "AirlineStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AirlineStore"]
+
+[[routes]]
+pattern = "spair.softprobe.ai/*"
+zone_name = "softprobe.ai"
+
+[assets]
+directory = "./public"
+binding = "DOCS"
+not_found_handling = "none"
+html_handling = "auto-trailing-slash"

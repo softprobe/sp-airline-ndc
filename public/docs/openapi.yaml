@@ -1,0 +1,953 @@
+openapi: 3.0.3
+info:
+  title: sp-airline-ndc
+  description: |
+    IATA NDC 21.3 JSON mock airline API for the Softprobe demo (`travel-ota` upstream).
+
+    All NDC endpoints accept `POST` with a JSON body wrapped in the standard IATA message envelope
+    (`IATA_*RQ` / `IATA_*RS`). The mock accepts canonical NDC field names and a few simplified
+    aliases for demo convenience.
+  version: 1.0.0
+servers:
+  - url: https://spair.softprobe.ai
+tags:
+  - name: Health
+  - name: Shopping
+  - name: Booking
+  - name: Order management
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        "200":
+          description: Service running
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Airline NDC Mock Service is running
+
+  /ndc/v21.3/airshopping:
+    post:
+      tags: [Shopping]
+      summary: AirShopping (flight search)
+      description: Search flights between two airports on a given date. Returns up to 10 offers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IATA_AirShoppingRQ"
+            example:
+              IATA_AirShoppingRQ:
+                PayloadAttributes:
+                  CorrelationID: demo-search-1
+                Request:
+                  FlightCriteria:
+                    OriginDestCriteria:
+                      OriginDepCriteria:
+                        IATA_LocationCode: SFO
+                        Date: "2026-07-01"
+                      DestArrivalCriteria:
+                        IATA_LocationCode: LAX
+      responses:
+        "200":
+          description: AirShoppingRS with carrier offers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IATA_AirShoppingRS"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NdcErrorResponse"
+
+  /ndc/v21.3/offerprice:
+    post:
+      tags: [Shopping]
+      summary: OfferPrice
+      description: Price a selected offer item before booking.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IATA_OfferPriceRQ"
+            example:
+              IATA_OfferPriceRQ:
+                PayloadAttributes:
+                  CorrelationID: demo-price-1
+                Request:
+                  PricedOffer:
+                    OfferRefID: FL1781839421802338
+                    OfferItemRefID: FARE17818394218020194
+      responses:
+        "200":
+          description: Priced offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IATA_OfferPriceRS"
+        "400":
+          description: Offer not found or invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NdcErrorResponse"
+
+  /ndc/v21.3/ordercreate:
+    post:
+      tags: [Booking]
+      summary: OrderCreate (hold booking)
+      description: Create a booking in HELD status with PENDING payment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IATA_OrderCreateRQ"
+            example:
+              IATA_OrderCreateRQ:
+                PayloadAttributes:
+                  CorrelationID: demo-book-1
+                Request:
+                  CreateOrder:
+                    SelectedOffer:
+                      SelectedPricedOffer:
+                        OfferRefID: FL1781839421802338
+                        OfferItemRefID: FARE17818394218020194
+                  DataLists:
+                    PaxList:
+                      - PTC: ADULT
+                        Individual:
+                          GivenName: E2E
+                          Surname: SoftProbe
+                        documentType: PASSPORT
+                        documentNumber: SP123
+      responses:
+        "200":
+          description: OrderViewRS with new booking
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IATA_OrderViewRS"
+        "400":
+          description: Invalid offer or passenger data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NdcErrorResponse"
+
+  /ndc/v21.3/orderchange:
+    post:
+      tags: [Order management]
+      summary: OrderChange
+      description: |
+        Multi-purpose order change endpoint. The mock dispatches by payload shape:
+
+        - **Payment** — `Request.OrderChange.PaymentFunctions` or `_ndcChangeType: payment`
+        - **Flight change** — `Request.OrderChange.SelectedOffer` with new offer IDs
+        - **Baggage** — `Request.OrderChange.BaggageType` or `_ndcChangeType: baggage`
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/IATA_OrderChangePaymentRQ"
+                - $ref: "#/components/schemas/IATA_OrderChangeFlightRQ"
+                - $ref: "#/components/schemas/IATA_OrderChangeBaggageRQ"
+            examples:
+              payment:
+                summary: Pay for a held booking
+                value:
+                  _ndcChangeType: payment
+                  IATA_OrderChangeRQ:
+                    PayloadAttributes:
+                      CorrelationID: demo-pay-1
+                    Request:
+                      OrderChange:
+                        Order:
+                          OrderID: BK1781839421802338
+                        PaymentFunctions:
+                          - Amount: 847
+                            Currency: USD
+                            PaymentMethod: CREDIT_CARD
+              flightChange:
+                summary: Change to a different flight
+                value:
+                  IATA_OrderChangeRQ:
+                    PayloadAttributes:
+                      CorrelationID: demo-change-1
+                    Request:
+                      OrderChange:
+                        ConfirmationNumber: ABC123
+                        PassengerLastName: SoftProbe
+                        ChangeReason: PERSONAL_REASON
+                        SelectedOffer:
+                          OfferRefID: FL1781839421802999
+                          OfferItemRefID: FARE1781839421802999
+              baggage:
+                summary: Add checked baggage
+                value:
+                  _ndcChangeType: baggage
+                  IATA_OrderChangeRQ:
+                    PayloadAttributes:
+                      CorrelationID: demo-bag-1
+                    Request:
+                      OrderChange:
+                        confirmationNumber: ABC123
+                        PassengerLastName: SoftProbe
+                        PassengerID: PAX1
+                        AdditionalBags: 1
+                        BaggageType: CHECKED
+      responses:
+        "200":
+          description: OrderViewRS (payment, flight change, or baggage result)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IATA_OrderViewRS"
+        "400":
+          description: Invalid booking or change request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NdcErrorResponse"
+
+  /ndc/v21.3/orderretrieve:
+    post:
+      tags: [Order management]
+      summary: OrderRetrieve
+      description: Look up a booking by confirmation number and passenger last name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IATA_OrderRetrieveRQ"
+            example:
+              IATA_OrderRetrieveRQ:
+                PayloadAttributes:
+                  CorrelationID: demo-retrieve-1
+                Request:
+                  OrderValidationFilterCriteria:
+                    BookingRefID: ABC123
+                    PassengerLastName: SoftProbe
+      responses:
+        "200":
+          description: OrderViewRS with booking details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IATA_OrderViewRS"
+        "400":
+          description: Booking not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NdcErrorResponse"
+
+  /ndc/v21.3/ordercancel:
+    post:
+      tags: [Order management]
+      summary: OrderCancel (refund)
+      description: |
+        Cancel a paid booking and calculate refund. Unpaid bookings are rejected.
+        Refund fees depend on hours until departure and `RefundReason`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IATA_OrderCancelRQ"
+            example:
+              IATA_OrderCancelRQ:
+                PayloadAttributes:
+                  CorrelationID: demo-cancel-1
+                Request:
+                  Order:
+                    BookingRefID: ABC123
+                    PassengerLastName: SoftProbe
+                    RefundReason: PERSONAL_REASON
+      responses:
+        "200":
+          description: Refund result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IATA_OrderViewRS"
+        "400":
+          description: Booking not eligible for refund
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NdcErrorResponse"
+
+  /ndc/v21.3/servicelist:
+    post:
+      tags: [Order management]
+      summary: ServiceList (baggage catalog)
+      description: List available ancillary services (baggage options) for an existing booking.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IATA_ServiceListRQ"
+            example:
+              IATA_ServiceListRQ:
+                PayloadAttributes:
+                  CorrelationID: demo-services-1
+                Request:
+                  Order:
+                    BookingRefID: ABC123
+      responses:
+        "200":
+          description: Available services
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IATA_ServiceListRS"
+        "400":
+          description: Booking not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NdcErrorResponse"
+
+components:
+  schemas:
+    PayloadAttributes:
+      type: object
+      properties:
+        CorrelationID:
+          type: string
+          description: Client-supplied or server-generated correlation ID echoed in the response.
+          example: demo-search-1
+
+    NdcError:
+      type: object
+      properties:
+        Code:
+          type: string
+          example: ERROR
+        DescText:
+          type: string
+          example: Offer not found
+
+    NdcErrorResponse:
+      type: object
+      properties:
+        PayloadAttributes:
+          $ref: "#/components/schemas/PayloadAttributes"
+        Error:
+          $ref: "#/components/schemas/NdcError"
+
+    Amount:
+      type: object
+      properties:
+        Value:
+          type: number
+          format: double
+        CurCode:
+          type: string
+          example: USD
+
+    Location:
+      type: object
+      properties:
+        IATA_LocationCode:
+          type: string
+          example: SFO
+        CityName:
+          type: string
+          example: San Francisco
+        DateTime:
+          type: string
+          format: date-time
+          example: "2026-07-01T08:30:00"
+
+    FareDetail:
+      type: object
+      properties:
+        FareBrand:
+          type: string
+          enum: [Basic, Standard, Flex, Premium]
+        CabinClass:
+          type: string
+          enum: [ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST]
+
+    OfferItem:
+      type: object
+      properties:
+        OfferItemID:
+          type: string
+        Price:
+          type: object
+          properties:
+            TotalAmount:
+              $ref: "#/components/schemas/Amount"
+        FareDetail:
+          $ref: "#/components/schemas/FareDetail"
+
+    JourneyOverview:
+      type: object
+      properties:
+        FlightNumber:
+          type: string
+          example: KL1234
+        Departure:
+          $ref: "#/components/schemas/Location"
+        Arrival:
+          $ref: "#/components/schemas/Location"
+
+    CarrierOffer:
+      type: object
+      properties:
+        Offer:
+          type: object
+          properties:
+            OfferID:
+              type: string
+            OwnerCode:
+              type: string
+              description: IATA airline code
+              example: KL
+            OfferItem:
+              type: array
+              items:
+                $ref: "#/components/schemas/OfferItem"
+            JourneyOverview:
+              $ref: "#/components/schemas/JourneyOverview"
+
+    SearchSummary:
+      type: object
+      properties:
+        totalResults:
+          type: integer
+        lowestPrice:
+          type: number
+        highestPrice:
+          type: number
+        sortBy:
+          type: string
+        datePrices:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              minPrice:
+                type: number
+              selected:
+                type: boolean
+
+    IATA_AirShoppingRQ:
+      type: object
+      required: [IATA_AirShoppingRQ]
+      properties:
+        IATA_AirShoppingRQ:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Request:
+              type: object
+              properties:
+                FlightCriteria:
+                  type: object
+                  properties:
+                    OriginDestCriteria:
+                      type: object
+                      properties:
+                        OriginDepCriteria:
+                          type: object
+                          properties:
+                            IATA_LocationCode:
+                              type: string
+                            Date:
+                              type: string
+                              format: date
+                        DestArrivalCriteria:
+                          type: object
+                          properties:
+                            IATA_LocationCode:
+                              type: string
+
+    IATA_AirShoppingRS:
+      type: object
+      properties:
+        IATA_AirShoppingRS:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Response:
+              type: object
+              properties:
+                OffersGroup:
+                  type: object
+                  properties:
+                    CarrierOffers:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/CarrierOffer"
+                DataLists:
+                  type: object
+                  properties:
+                    Summary:
+                      $ref: "#/components/schemas/SearchSummary"
+
+    IATA_OfferPriceRQ:
+      type: object
+      properties:
+        IATA_OfferPriceRQ:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Request:
+              type: object
+              properties:
+                PricedOffer:
+                  type: object
+                  properties:
+                    OfferRefID:
+                      type: string
+                    OfferItemRefID:
+                      type: string
+
+    IATA_OfferPriceRS:
+      type: object
+      properties:
+        IATA_OfferPriceRS:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Response:
+              type: object
+              properties:
+                PricedOffer:
+                  type: object
+                  properties:
+                    OfferRefID:
+                      type: string
+                    OfferItemRefID:
+                      type: string
+                    TotalPrice:
+                      type: object
+                      properties:
+                        TotalAmount:
+                          $ref: "#/components/schemas/Amount"
+
+    PassengerInput:
+      type: object
+      properties:
+        PTC:
+          type: string
+          enum: [ADULT, CHILD, INFANT]
+        Individual:
+          type: object
+          properties:
+            GivenName:
+              type: string
+            Surname:
+              type: string
+        documentType:
+          type: string
+          example: PASSPORT
+        documentNumber:
+          type: string
+
+    IATA_OrderCreateRQ:
+      type: object
+      properties:
+        IATA_OrderCreateRQ:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Request:
+              type: object
+              properties:
+                CreateOrder:
+                  type: object
+                  properties:
+                    SelectedOffer:
+                      type: object
+                      properties:
+                        SelectedPricedOffer:
+                          type: object
+                          properties:
+                            OfferRefID:
+                              type: string
+                            OfferItemRefID:
+                              type: string
+                DataLists:
+                  type: object
+                  properties:
+                    PaxList:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PassengerInput"
+
+    FlightInfo:
+      type: object
+      properties:
+        flightId:
+          type: string
+        flightNumber:
+          type: string
+        departureAirport:
+          type: string
+        departureCity:
+          type: string
+        departureTime:
+          type: string
+          format: date-time
+        arrivalAirport:
+          type: string
+        arrivalCity:
+          type: string
+        arrivalTime:
+          type: string
+          format: date-time
+        cabinClass:
+          type: string
+
+    PassengerInfo:
+      type: object
+      properties:
+        passengerId:
+          type: string
+        passengerType:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        documentType:
+          type: string
+        documentNumber:
+          type: string
+        seatNumber:
+          type: string
+        mealPreference:
+          type: string
+
+    PaymentInfo:
+      type: object
+      properties:
+        paymentId:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        paymentMethod:
+          type: string
+        paymentStatus:
+          type: string
+          enum: [PENDING, PAID, REFUNDED]
+        paymentDate:
+          type: string
+          format: date-time
+
+    Order:
+      type: object
+      properties:
+        OrderID:
+          type: string
+          description: Internal booking ID (e.g. BK…)
+        BookingRefID:
+          type: string
+          description: PNR / confirmation number
+        StatusCode:
+          type: string
+          enum: [HELD, CONFIRMED, CANCELLED, CHANGED]
+        CreationDateTime:
+          type: string
+          format: date-time
+        FlightInfo:
+          $ref: "#/components/schemas/FlightInfo"
+        Passengers:
+          type: array
+          items:
+            $ref: "#/components/schemas/PassengerInfo"
+        PaymentInfo:
+          $ref: "#/components/schemas/PaymentInfo"
+
+    RefundResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [SUCCESS, FAILED]
+        refundAmount:
+          type: number
+        cancellationFee:
+          type: number
+        currency:
+          type: string
+        refundReason:
+          type: string
+
+    PaymentResult:
+      type: object
+      properties:
+        paymentId:
+          type: string
+        status:
+          type: string
+          enum: [SUCCESS, FAILED]
+        amount:
+          type: number
+        currency:
+          type: string
+
+    BaggageResult:
+      type: object
+      properties:
+        baggageOrderId:
+          type: string
+        status:
+          type: string
+        additionalBags:
+          type: integer
+        totalPrice:
+          type: number
+
+    FlightChangeResult:
+      type: object
+      properties:
+        changeId:
+          type: string
+        status:
+          type: string
+        changeFee:
+          type: number
+        newBookingId:
+          type: string
+
+    IATA_OrderViewRS:
+      type: object
+      properties:
+        IATA_OrderViewRS:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Response:
+              type: object
+              properties:
+                Order:
+                  $ref: "#/components/schemas/Order"
+                Payment:
+                  $ref: "#/components/schemas/PaymentResult"
+                Refund:
+                  $ref: "#/components/schemas/RefundResult"
+                Baggage:
+                  $ref: "#/components/schemas/BaggageResult"
+                OrderChange:
+                  $ref: "#/components/schemas/FlightChangeResult"
+
+    IATA_OrderChangePaymentRQ:
+      type: object
+      properties:
+        _ndcChangeType:
+          type: string
+          enum: [payment]
+        IATA_OrderChangeRQ:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Request:
+              type: object
+              properties:
+                OrderChange:
+                  type: object
+                  properties:
+                    Order:
+                      type: object
+                      properties:
+                        OrderID:
+                          type: string
+                    PaymentFunctions:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          Amount:
+                            type: number
+                          Currency:
+                            type: string
+                          PaymentMethod:
+                            type: string
+
+    IATA_OrderChangeFlightRQ:
+      type: object
+      properties:
+        IATA_OrderChangeRQ:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Request:
+              type: object
+              properties:
+                OrderChange:
+                  type: object
+                  properties:
+                    OriginalBookingID:
+                      type: string
+                    ConfirmationNumber:
+                      type: string
+                    PassengerLastName:
+                      type: string
+                    ChangeReason:
+                      type: string
+                      enum: [PERSONAL_REASON, SCHEDULE_CHANGE, EMERGENCY]
+                    SelectedOffer:
+                      type: object
+                      properties:
+                        OfferRefID:
+                          type: string
+                        OfferItemRefID:
+                          type: string
+
+    IATA_OrderChangeBaggageRQ:
+      type: object
+      properties:
+        _ndcChangeType:
+          type: string
+          enum: [baggage]
+        IATA_OrderChangeRQ:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Request:
+              type: object
+              properties:
+                OrderChange:
+                  type: object
+                  properties:
+                    bookingId:
+                      type: string
+                    confirmationNumber:
+                      type: string
+                    PassengerLastName:
+                      type: string
+                    PassengerID:
+                      type: string
+                    AdditionalBags:
+                      type: integer
+                    BaggageType:
+                      type: string
+                      enum: [CHECKED, CABIN]
+                    equipmentType:
+                      type: string
+
+    IATA_OrderRetrieveRQ:
+      type: object
+      properties:
+        IATA_OrderRetrieveRQ:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Request:
+              type: object
+              properties:
+                OrderValidationFilterCriteria:
+                  type: object
+                  properties:
+                    BookingRefID:
+                      type: string
+                    PassengerLastName:
+                      type: string
+
+    IATA_OrderCancelRQ:
+      type: object
+      properties:
+        IATA_OrderCancelRQ:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Request:
+              type: object
+              properties:
+                Order:
+                  type: object
+                  properties:
+                    OrderID:
+                      type: string
+                    BookingRefID:
+                      type: string
+                    PassengerLastName:
+                      type: string
+                    RefundReason:
+                      type: string
+                      enum: [PERSONAL_REASON, SCHEDULE_CHANGE, EMERGENCY]
+
+    ServiceOption:
+      type: object
+      properties:
+        serviceId:
+          type: string
+        serviceType:
+          type: string
+          example: BAGGAGE
+        description:
+          type: string
+        price:
+          type: number
+        currency:
+          type: string
+        maxQuantity:
+          type: integer
+
+    IATA_ServiceListRQ:
+      type: object
+      properties:
+        IATA_ServiceListRQ:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Request:
+              type: object
+              properties:
+                Order:
+                  type: object
+                  properties:
+                    OrderID:
+                      type: string
+                    BookingRefID:
+                      type: string
+
+    IATA_ServiceListRS:
+      type: object
+      properties:
+        IATA_ServiceListRS:
+          type: object
+          properties:
+            PayloadAttributes:
+              $ref: "#/components/schemas/PayloadAttributes"
+            Response:
+              type: object
+              properties:
+                Service:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ServiceOption"
