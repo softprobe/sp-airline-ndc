@@ -9,6 +9,38 @@ import type {
 
 const EMPTY: StoreState = { offers: {}, bookings: {} };
 
+/** ~5 workspace e2e runs (4 routes × 10 offers). Mock only — no long-term retention. */
+const MAX_OFFERS = 200;
+const MAX_BOOKINGS = 50;
+
+export function pruneState(state: StoreState): void {
+  const bookingById = new Map<string, BookingRecord>();
+  for (const booking of Object.values(state.bookings)) {
+    bookingById.set(booking.bookingId, booking);
+  }
+  const keptBookings = [...bookingById.values()]
+    .sort((a, b) => b.bookingId.localeCompare(a.bookingId))
+    .slice(0, MAX_BOOKINGS);
+
+  const requiredOfferIds = new Set(keptBookings.map((b) => b.flightInfo.flightId));
+
+  const keptOffers: Record<string, StoredOffer> = {};
+  for (const id of Object.keys(state.offers).sort((a, b) => b.localeCompare(a))) {
+    if (Object.keys(keptOffers).length < MAX_OFFERS || requiredOfferIds.has(id)) {
+      keptOffers[id] = state.offers[id];
+    }
+  }
+
+  const bookings: Record<string, BookingRecord> = {};
+  for (const b of keptBookings) {
+    bookings[b.bookingId] = b;
+    bookings[b.confirmationNumber] = b;
+  }
+
+  state.offers = keptOffers;
+  state.bookings = bookings;
+}
+
 function nowIso(): string {
   return new Date().toISOString().slice(0, 19);
 }
@@ -402,6 +434,7 @@ export class AirlineStore implements DurableObject {
   }
 
   private async persist(): Promise<void> {
+    pruneState(this.state);
     await this.ctx.storage.put("state", this.state);
   }
 

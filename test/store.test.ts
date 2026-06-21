@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runAction, emptyState } from "../src/airline-store";
+import { pruneState, runAction, emptyState } from "../src/airline-store";
 import type { StoreState } from "../src/types";
 
 function fresh(): StoreState {
@@ -50,6 +50,23 @@ describe("airshopping + book + pay flow", () => {
       paymentMethod: "CREDIT_CARD",
     });
     expect(paid.status).toBe("SUCCESS");
+  });
+});
+
+describe("state retention", () => {
+  it("prunes old offers after many searches", () => {
+    const state = fresh();
+    for (let i = 0; i < 100; i++) {
+      runAction(state, {
+        op: "airshopping",
+        from: "SEA",
+        to: "LAS",
+        departureDate: "2026-07-01",
+      });
+      pruneState(state);
+    }
+    expect(Object.keys(state.offers).length).toBeLessThanOrEqual(200);
+    expect(Buffer.byteLength(JSON.stringify(state), "utf8")).toBeLessThan(500_000);
   });
 });
 
